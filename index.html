@@ -560,14 +560,22 @@
             }
             if (data.type === 'STATE_QUESTION') {
                 hideAll();
-                document.getElementById('player-quiz').classList.remove('hidden');
-                document.getElementById('player-quiz').classList.add('flex');
+                const quizScreen = document.getElementById('player-quiz');
+                quizScreen.classList.remove('hidden');
+                // 確保強制轉為 flex 以顯示 grid
+                quizScreen.classList.add('flex');
+                
                 document.getElementById('player-q-current').innerText = data.qNum;
-                document.getElementById('player-answered-msg').classList.add('hidden');
-                document.getElementById('player-answered-msg').classList.remove('flex');
+                
+                const answeredMsg = document.getElementById('player-answered-msg');
+                answeredMsg.classList.add('hidden');
+                answeredMsg.classList.remove('flex');
                 
                 for(let i=0; i<4; i++) {
-                    document.getElementById(`p-btn-${i}`).disabled = false;
+                    const btn = document.getElementById(`p-btn-${i}`);
+                    btn.disabled = false;
+                    // 確保禁用的透明度重置
+                    btn.style.opacity = '1';
                 }
             }
             if (data.type === 'STATE_RESULT') {
