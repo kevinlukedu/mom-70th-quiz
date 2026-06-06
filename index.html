@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>媽媽70大壽超級無敵問答大會</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- WebRTC PeerJS for serverless multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans HK', sans-serif;
+            background: radial-gradient(circle at center, #d93838 0%, #991b1b 100%);
+            -webkit-user-select: none; user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Kahoot Style Colors */
+        .opt-0 { background-color: #e21b3c; border-bottom: 6px solid #b0152f; }
+        .opt-1 { background-color: #1368ce; border-bottom: 6px solid #0f51a1; }
+        .opt-2 { background-color: #d89e00; border-bottom: 6px solid #a87b00; }
+        .opt-3 { background-color: #26890c; border-bottom: 6px solid #1d6a09; }
+
+        .opt-btn { transition: transform 0.1s; }
+        .opt-btn:active:not(:disabled) { transform: translateY(4px); border-bottom-width: 2px; }
+        .opt-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .bg-pattern {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            opacity: 0.05; background-image: radial-gradient(#fff 2px, transparent 2px);
+            background-size: 30px 30px; pointer-events: none; z-index: 0;
+        }
+
+        /* Leaderboard Animations */
+        .leaderboard-row {
+            animation: slideIn 0.5s ease-out forwards;
+            opacity: 0; transform: translateX(-50px);
+        }
+        @keyframes slideIn { to { opacity: 1; transform: translateX(0); } }
+    </style>
+</head>
+<body class="text-white h-screen w-screen overflow-hidden flex flex-col items-center justify-center relative">
+    <div class="bg-pattern"></div>
+
+    <div id="home-screen" class="z-10 flex flex-col items-center justify-center w-full h-full p-8 text-center">
+        <h1 class="text-5xl md:text-7xl font-black text-yellow-300 mb-8 drop-shadow-xl">超級無敵問答大會</h1>
+        <div class="flex flex-col gap-6 w-full max-w-md">
+            <button onclick="initHost()" class="bg-white text-red-800 font-bold text-3xl py-6 rounded-full shadow-[0_6px_0_#d1d5db] active:translate-y-2 active:shadow-none transition-all">
+                <i class="fa-solid fa-desktop mr-2"></i> 我係主持 (大電視)
+            </button>
+        </div>
+        <p class="mt-8 text-white/70">（玩家請直接掃描大電視嘅 QR Code 加入，無需喺度撳掣）</p>
+    </div>
+
+    <!-- ==================== HOST SCREENS ==================== -->
+    
+    <div id="host-lobby" class="z-10 hidden flex-col items-center justify-center w-full h-full p-4 md:p-8">
+        <div class="bg-white/10 p-8 rounded-3xl backdrop-blur-sm border border-white/20 shadow-2xl flex flex-col md:flex-row items-center gap-12 max-w-5xl w-full">
+            <div class="flex flex-col items-center">
+                <h2 class="text-3xl font-bold mb-4">用手機掃描加入遊戲！</h2>
+                <div id="qrcode" class="p-4 bg-white rounded-xl shadow-lg mb-4"></div>
+                <p class="text-xl text-yellow-300 font-bold">已連接玩家：<span id="player-count">0</span> 人</p>
+            </div>
+            <div class="flex-grow w-full flex flex-col h-96">
+                <h3 class="text-2xl font-bold mb-4 border-b border-white/30 pb-2">玩家名單</h3>
+                <div id="player-list" class="flex-grow overflow-y-auto flex flex-wrap gap-3 content-start">
+                    <!-- Player names appear here -->
+                </div>
+                <button onclick="startHostGame()" id="start-game-btn" disabled class="mt-6 bg-yellow-400 disabled:bg-gray-500 disabled:shadow-none text-red-800 font-bold text-3xl py-4 rounded-full shadow-[0_6px_0_#b48600] active:translate-y-2 transition-all w-full">
+                    開始遊戲 <i class="fa-solid fa-play ml-2"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="host-quiz" class="z-10 hidden flex-col w-full h-full max-w-7xl mx-auto p-4 md:p-8">
+        <div class="flex justify-between items-center mb-6 bg-white/10 px-6 py-3 rounded-full backdrop-blur-sm">
+            <span class="text-2xl font-bold text-yellow-300">問題 <span id="host-q-current">1</span> / 10</span>
+            <span class="text-xl font-bold"><i class="fa-solid fa-users mr-2"></i> 已作答: <span id="answered-count">0</span></span>
+        </div>
+        <div class="flex-grow flex items-center justify-center bg-white text-gray-800 rounded-3xl shadow-2xl mb-8 p-8 text-center min-h-[30vh]">
+            <h2 id="host-q-text" class="text-4xl md:text-6xl font-bold leading-tight">問題載入中...</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-4 h-2/5">
+            <div id="host-opt-0" class="opt-0 rounded-2xl p-6 flex items-center justify-start text-left shadow-lg relative overflow-hidden transition-all duration-500">
+                <i class="fa-solid fa-play fa-rotate-270 text-4xl text-white drop-shadow-md mr-6 w-12 text-center"></i>
+                <span id="host-t-0" class="text-3xl md:text-4xl font-bold text-white drop-shadow-md">選項 A</span>
+                <span id="host-count-0" class="absolute right-6 text-5xl font-black text-white/50 hidden">0</span>
+            </div>
+            <div id="host-opt-1" class="opt-1 rounded-2xl p-6 flex items-center justify-start text-left shadow-lg relative overflow-hidden transition-all duration-500">
+                <i class="fa-solid fa-diamond text-4xl text-white drop-shadow-md mr-6 w-12 text-center"></i>
+                <span id="host-t-1" class="text-3xl md:text-4xl font-bold text-white drop-shadow-md">選項 B</span>
+                <span id="host-count-1" class="absolute right-6 text-5xl font-black text-white/50 hidden">0</span>
+            </div>
+            <div id="host-opt-2" class="opt-2 rounded-2xl p-6 flex items-center justify-start text-left shadow-lg relative overflow-hidden transition-all duration-500">
+                <i class="fa-solid fa-circle text-4xl text-white drop-shadow-md mr-6 w-12 text-center"></i>
+                <span id="host-t-2" class="text-3xl md:text-4xl font-bold text-white drop-shadow-md">選項 C</span>
+                <span id="host-count-2" class="absolute right-6 text-5xl font-black text-white/50 hidden">0</span>
+            </div>
+            <div id="host-opt-3" class="opt-3 rounded-2xl p-6 flex items-center justify-start text-left shadow-lg relative overflow-hidden transition-all duration-500">
+                <i class="fa-solid fa-square text-4xl text-white drop-shadow-md mr-6 w-12 text-center"></i>
+                <span id="host-t-3" class="text-3xl md:text-4xl font-bold text-white drop-shadow-md">選項 D</span>
+                <span id="host-count-3" class="absolute right-6 text-5xl font-black text-white/50 hidden">0</span>
+            </div>
+        </div>
+        <div class="mt-6 flex justify-center">
+            <button id="host-reveal-btn" onclick="hostRevealAnswer()" class="bg-white text-red-700 font-bold text-2xl py-4 px-12 rounded-full shadow-[0_6px_0_#d1d5db] active:translate-y-2 transition-all">
+                <i class="fa-solid fa-eye mr-2"></i> 開估！
+            </button>
+            <button id="host-next-btn" onclick="hostShowLeaderboard()" class="hidden bg-yellow-400 text-red-800 font-bold text-2xl py-4 px-12 rounded-full shadow-[0_6px_0_#b48600] active:translate-y-2 transition-all">
+                睇排行榜 <i class="fa-solid fa-trophy ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="host-leaderboard" class="z-10 hidden flex-col items-center w-full h-full max-w-4xl mx-auto p-8">
+        <h2 class="text-5xl font-black text-yellow-300 mb-8 drop-shadow-lg"><i class="fa-solid fa-ranking-star mr-3"></i> 得分排行榜</h2>
+        <div id="leaderboard-list" class="w-full flex-grow flex flex-col gap-4">
+            <!-- Ranks injected here -->
+        </div>
+        <button onclick="hostNextQuestion()" class="mt-8 bg-white text-red-800 font-bold text-3xl py-4 px-16 rounded-full shadow-[0_6px_0_#d1d5db] active:translate-y-2 transition-all">
+            下一題 <i class="fa-solid fa-arrow-right ml-2"></i>
+        </button>
+    </div>
+
+    <!-- ==================== PLAYER SCREENS (Mobile) ==================== -->
+    
+    <div id="player-join" class="z-10 hidden flex-col items-center justify-center w-full h-full p-6 text-center">
+        <div class="bg-white p-8 rounded-3xl w-full max-w-sm shadow-2xl">
+            <h2 class="text-3xl font-black text-red-700 mb-6">加入遊戲</h2>
+            <input type="text" id="player-name-input" placeholder="輸入你嘅大名" class="w-full text-2xl p-4 border-4 border-gray-200 rounded-xl mb-6 text-center text-gray-800 font-bold focus:border-red-500 focus:outline-none">
+            <button onclick="joinGame()" class="w-full bg-yellow-400 text-red-800 font-bold text-2xl py-4 rounded-xl shadow-[0_6px_0_#b48600] active:translate-y-2 transition-all">
+                進入大廳
+            </button>
+            <p id="join-status" class="mt-4 text-red-500 font-bold hidden">連線中...</p>
+        </div>
+    </div>
+
+    <div id="player-wait" class="z-10 hidden flex-col items-center justify-center w-full h-full p-8 text-center">
+        <i class="fa-solid fa-spinner fa-spin text-6xl text-yellow-300 mb-6"></i>
+        <h2 class="text-4xl font-bold mb-4">準備就緒！</h2>
+        <p class="text-2xl text-white/80">請望住大電視，等候主持開始...</p>
+        <div class="mt-8 bg-black/20 px-6 py-3 rounded-full text-xl font-bold">
+            <i class="fa-solid fa-user mr-2"></i> <span id="my-name-display"></span>
+        </div>
+    </div>
+
+    <div id="player-quiz" class="z-10 hidden flex-col w-full h-full p-4">
+        <div class="flex justify-between items-center mb-4 text-xl font-bold">
+            <span class="bg-black/20 px-4 py-2 rounded-full">問題 <span id="player-q-current">1</span></span>
+            <span class="bg-black/20 px-4 py-2 rounded-full"><i class="fa-solid fa-star text-yellow-300"></i> <span id="my-score">0</span></span>
+        </div>
+        <div class="grid grid-cols-2 grid-rows-2 gap-4 flex-grow pb-4">
+            <button onclick="submitAnswer(0)" id="p-btn-0" class="opt-btn opt-0 rounded-2xl flex items-center justify-center shadow-lg w-full h-full">
+                <i class="fa-solid fa-play fa-rotate-270 text-6xl text-white drop-shadow-md"></i>
+            </button>
+            <button onclick="submitAnswer(1)" id="p-btn-1" class="opt-btn opt-1 rounded-2xl flex items-center justify-center shadow-lg w-full h-full">
+                <i class="fa-solid fa-diamond text-6xl text-white drop-shadow-md"></i>
+            </button>
+            <button onclick="submitAnswer(2)" id="p-btn-2" class="opt-btn opt-2 rounded-2xl flex items-center justify-center shadow-lg w-full h-full">
+                <i class="fa-solid fa-circle text-6xl text-white drop-shadow-md"></i>
+            </button>
+            <button onclick="submitAnswer(3)" id="p-btn-3" class="opt-btn opt-3 rounded-2xl flex items-center justify-center shadow-lg w-full h-full">
+                <i class="fa-solid fa-square text-6xl text-white drop-shadow-md"></i>
+            </button>
+        </div>
+        <div id="player-answered-msg" class="absolute inset-0 bg-black/80 hidden flex-col items-center justify-center z-20 backdrop-blur-sm">
+            <i class="fa-solid fa-check-circle text-6xl text-green-400 mb-4"></i>
+            <h2 class="text-4xl font-bold text-white">已作答！</h2>
+            <p class="text-xl text-white/80 mt-2">請望住大電視等開估</p>
+        </div>
+    </div>
+
+    <div id="player-result" class="z-10 hidden flex-col items-center justify-center w-full h-full p-8 text-center transition-colors duration-500">
+        <i id="result-icon" class="fa-solid text-8xl mb-6"></i>
+        <h2 id="result-title" class="text-5xl font-black mb-4"></h2>
+        <div class="bg-black/30 px-8 py-4 rounded-3xl mt-8">
+            <p class="text-xl text-white/80 mb-1">目前總分</p>
+            <p id="result-score" class="text-5xl font-bold text-yellow-300">0</p>
+        </div>
+    </div>
+
+    <script>
+        // 媽媽專屬 10 條問題 (你揀嗰10條)
+        const questions = [
+            { q: "去酒樓飲茶，邊一籠點心係媽媽嘅「必點」？", options: ["蟹籽燒賣", "晶瑩蝦餃", "豉汁排骨", "醬皇鳳爪"], answer: 1 },
+            { q: "如果而家可以即刻食一餐好嘅，媽媽最想食咩？", options: ["大牌檔海鮮", "酒店自助餐", "傳統中菜", "日本壽司"], answer: 1 },
+            { q: "媽媽人生第一份工係做咩行業？", options: ["製衣廠女工", "百貨公司售貨員", "教小學", "寫字樓文員"], answer: 2 },
+            { q: "細個讀書嗰陣，媽媽邊一科成績最差？", options: ["中國語文", "英國語文", "體育", "數學"], answer: 3 },
+            { q: "後生嗰陣，媽媽覺得邊個男明星最型/最靚仔？", options: ["周潤發", "張國榮", "劉德華", "鄭少秋"], answer: 1 },
+            { q: "人生去過咁多次旅行，邊個地方媽媽最難忘？", options: ["日本北海道", "歐洲克羅地亞", "泰國曼谷", "加拿大溫哥華"], answer: 1 },
+            { q: "平時喺屋企，媽媽最鍾意睇邊類電視節目？", options: ["愛·回家", "無綫新聞", "肥媽節目", "韓劇"], answer: 3 },
+            { q: "夜晚通常幾點鐘，媽媽就一定要上床瞓覺？", options: ["夜晚 10 點前", "半夜 12 點", "凌晨 2 點前", "天光先瞓"], answer: 2 },
+            { q: "Kevin 細個嗰陣，做過最百厭嘅一件事係咩？", options: ["畫花埲牆", "唔肯食飯", "扮超人", "偷睇電視"], answer: 2 },
+            { q: "咁多年嚟，媽媽最常講嘅「口頭禪」係咩？", options: ["食咗飯未呀？", "靚仔", "著多件衫呀！", "早啲瞓啦！"], answer: 1 }
+        ];
+
+        // System Variables
+        let peer = null;
+        let hostConn = null; // For player to talk to host
+        let playersData = {}; // For host to store { conn, name, score, currentAnswer }
+        
+        let currentQIndex = 0;
+        let isHost = false;
+        let myName = "";
+        let myScore = 0;
+
+        // Auto-detect Role based on URL
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hostId = urlParams.get('room');
+            if (hostId) {
+                // Someone scanned the QR code! Show player join screen.
+                hideAll();
+                document.getElementById('player-join').classList.remove('hidden');
+                document.getElementById('player-join').classList.add('flex');
+            } else {
+                // Show home screen for the laptop to start as Host
+                document.getElementById('home-screen').classList.remove('hidden');
+            }
+        };
+
+        function hideAll() {
+            const screens = ['home-screen', 'host-lobby', 'host-quiz', 'host-leaderboard', 'player-join', 'player-wait', 'player-quiz', 'player-result'];
+            screens.forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+                document.getElementById(id).classList.remove('flex');
+            });
+        }
+
+        /* ==================== HOST LOGIC ==================== */
+        
+        function initHost() {
+            hideAll();
+            document.getElementById('host-lobby').classList.remove('hidden');
+            document.getElementById('host-lobby').classList.add('flex');
+            isHost = true;
+
+            // Initialize PeerJS as Host
+            document.getElementById("qrcode").innerHTML = '<div class="text-gray-500 flex flex-col items-center py-8"><i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-yellow-500"></i><p class="font-bold">連線中，準備產生 QR Code...</p></div>';
+            
+            peer = new Peer(); 
+            peer.on('open', (id) => {
+                document.getElementById("qrcode").innerHTML = ''; // Clear loading state
+                
+                // Safely create joining URL
+                const baseUrl = window.location.href.split('?')[0];
+                const joinUrl = baseUrl + '?room=' + id;
+                console.log("遊戲連結: ", joinUrl); // For debugging
+                
+                try {
+                    // Generate QR Code (using CorrectLevel.L for longer URLs)
+                    new QRCode(document.getElementById("qrcode"), {
+                        text: joinUrl, 
+                        width: 220, 
+                        height: 220,
+                        colorDark : "#991b1b", 
+                        colorLight : "#ffffff",
+                        correctLevel : QRCode.CorrectLevel.L
+                    });
+                    
+                    // Add URL text below QR code as a fallback
+                    const urlDiv = document.createElement('div');
+                    urlDiv.className = 'mt-3 text-xs text-gray-500 break-all max-w-[220px] text-center';
+                    urlDiv.innerHTML = `如果掃唔到，請親戚喺瀏覽器輸入:<br><a href="${joinUrl}" target="_blank" class="text-blue-500 underline">${joinUrl}</a>`;
+                    document.getElementById("qrcode").appendChild(urlDiv);
+                } catch(e) {
+                    console.error("QR Code generation error:", e);
+                    document.getElementById("qrcode").innerHTML = '<p class="text-red-500 font-bold p-4">QR Code 顯示發生錯誤，請重新整理頁面。</p>';
+                }
+            });
+
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                document.getElementById("qrcode").innerHTML = `<div class="text-red-500 font-bold text-center p-4"><i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i><br>伺服器連線失敗 (${err.type})<br>請檢查網絡並重新整理頁面。</div>`;
+            });
+
+            // Listen for players joining
+            peer.on('connection', (conn) => {
+                conn.on('data', (data) => {
+                    if (data.type === 'JOIN') {
+                        playersData[conn.peer] = { conn: conn, name: data.name, score: 0, currentAnswer: null };
+                        updateLobbyUI();
+                        // Tell player they joined successfully
+                        conn.send({ type: 'JOIN_SUCCESS' });
+                    }
+                    if (data.type === 'ANSWER') {
+                        if (playersData[conn.peer]) {
+                            playersData[conn.peer].currentAnswer = data.answer;
+                            updateAnsweredCount();
+                        }
+                    }
+                });
+                
+                conn.on('close', () => {
+                    delete playersData[conn.peer];
+                    updateLobbyUI();
+                });
+            });
+        }
+
+        function updateLobbyUI() {
+            const pList = document.getElementById('player-list');
+            pList.innerHTML = '';
+            let count = 0;
+            for (let id in playersData) {
+                count++;
+                const badge = document.createElement('div');
+                badge.className = 'bg-white/20 px-4 py-2 rounded-full font-bold text-lg';
+                badge.innerText = playersData[id].name;
+                pList.appendChild(badge);
+            }
+            document.getElementById('player-count').innerText = count;
+            document.getElementById('start-game-btn').disabled = count === 0;
+        }
+
+        function broadcast(msgObj) {
+            for (let id in playersData) {
+                playersData[id].conn.send(msgObj);
+            }
+        }
+
+        function startHostGame() {
+            currentQIndex = 0;
+            for(let id in playersData) playersData[id].score = 0;
+            hostLoadQuestion();
+        }
+
+        function hostLoadQuestion() {
+            hideAll();
+            document.getElementById('host-quiz').classList.remove('hidden');
+            document.getElementById('host-quiz').classList.add('flex');
+            
+            const q = questions[currentQIndex];
+            document.getElementById('host-q-current').innerText = currentQIndex + 1;
+            document.getElementById('host-q-text').innerText = q.q;
+            
+            // Reset Host UI
+            for(let i=0; i<4; i++) {
+                document.getElementById(`host-t-${i}`).innerText = q.options[i];
+                const optDiv = document.getElementById(`host-opt-${i}`);
+                optDiv.style.opacity = '1';
+                optDiv.style.transform = 'scale(1)';
+                optDiv.classList.remove('border-4', 'border-yellow-300', 'shadow-[0_0_30px_rgba(255,215,0,0.8)]');
+                document.getElementById(`host-count-${i}`).classList.add('hidden');
+                document.getElementById(`host-count-${i}`).innerText = '0';
+            }
+            
+            document.getElementById('host-reveal-btn').classList.remove('hidden');
+            document.getElementById('host-next-btn').classList.add('hidden');
+            
+            // Reset player answers
+            for (let id in playersData) playersData[id].currentAnswer = null;
+            updateAnsweredCount();
+
+            // Tell players to show question buttons
+            broadcast({ type: 'STATE_QUESTION', qNum: currentQIndex + 1 });
+        }
+
+        function updateAnsweredCount() {
+            let count = 0;
+            for (let id in playersData) {
+                if (playersData[id].currentAnswer !== null) count++;
+            }
+            document.getElementById('answered-count').innerText = count;
+        }
+
+        function hostRevealAnswer() {
+            const correctIndex = questions[currentQIndex].answer;
+            let answerCounts = [0, 0, 0, 0];
+
+            // Calculate scores
+            for (let id in playersData) {
+                const pAns = playersData[id].currentAnswer;
+                if (pAns !== null) answerCounts[pAns]++;
+                
+                if (pAns === correctIndex) {
+                    playersData[id].score += 1000; // Base score
+                    // Tell player they got it right
+                    playersData[id].conn.send({ type: 'STATE_RESULT', correct: true, score: playersData[id].score });
+                } else {
+                    // Tell player they got it wrong
+                    playersData[id].conn.send({ type: 'STATE_RESULT', correct: false, score: playersData[id].score });
+                }
+            }
+
+            // Animate Host UI
+            for(let i=0; i<4; i++) {
+                const optDiv = document.getElementById(`host-opt-${i}`);
+                const countSpan = document.getElementById(`host-count-${i}`);
+                countSpan.innerText = answerCounts[i];
+                countSpan.classList.remove('hidden');
+
+                if(i === correctIndex) {
+                    optDiv.classList.add('border-4', 'border-yellow-300', 'shadow-[0_0_30px_rgba(255,215,0,0.8)]');
+                    optDiv.style.transform = 'scale(1.05)';
+                    optDiv.style.zIndex = '10';
+                } else {
+                    optDiv.style.opacity = '0.3';
+                    optDiv.style.transform = 'scale(0.95)';
+                }
+            }
+
+            document.getElementById('host-reveal-btn').classList.add('hidden');
+            document.getElementById('host-next-btn').classList.remove('hidden');
+            fireConfetti();
+        }
+
+        function hostShowLeaderboard() {
+            hideAll();
+            document.getElementById('host-leaderboard').classList.remove('hidden');
+            document.getElementById('host-leaderboard').classList.add('flex');
+
+            // Sort players
+            let sorted = Object.values(playersData).sort((a, b) => b.score - a.score);
+            const listObj = document.getElementById('leaderboard-list');
+            listObj.innerHTML = '';
+
+            // Show top 5
+            for(let i=0; i<Math.min(5, sorted.length); i++) {
+                const p = sorted[i];
+                const row = document.createElement('div');
+                row.className = `leaderboard-row bg-white text-gray-800 rounded-2xl p-4 flex justify-between items-center shadow-lg`;
+                row.style.animationDelay = `${i * 0.1}s`;
+                
+                let rankIcon = `<span class="text-2xl font-bold text-gray-500 w-8">${i+1}.</span>`;
+                if(i===0) rankIcon = `<i class="fa-solid fa-medal text-3xl text-yellow-400 w-8"></i>`;
+                if(i===1) rankIcon = `<i class="fa-solid fa-medal text-3xl text-gray-400 w-8"></i>`;
+                if(i===2) rankIcon = `<i class="fa-solid fa-medal text-3xl text-amber-600 w-8"></i>`;
+
+                row.innerHTML = `
+                    <div class="flex items-center">
+                        ${rankIcon}
+                        <span class="text-3xl font-bold ml-4">${p.name}</span>
+                    </div>
+                    <span class="text-3xl font-black text-red-600">${p.score}</span>
+                `;
+                listObj.appendChild(row);
+            }
+
+            // Tell players to look at big screen
+            broadcast({ type: 'STATE_WAITING', msg: "請望大電視睇排行榜！" });
+        }
+
+        function hostNextQuestion() {
+            currentQIndex++;
+            if(currentQIndex < questions.length) {
+                hostLoadQuestion();
+            } else {
+                // Finale
+                document.getElementById('host-leaderboard').innerHTML = `
+                    <i class="fa-solid fa-cake-candles text-8xl text-yellow-300 mb-8 animate-bounce"></i>
+                    <h1 class="text-6xl md:text-8xl font-black text-white mb-6 drop-shadow-2xl">祝媽媽生日快樂！</h1>
+                    <h2 class="text-4xl md:text-6xl font-bold text-yellow-300 mb-12 drop-shadow-xl">永遠健康、喜樂平安！</h2>
+                `;
+                broadcast({ type: 'STATE_WAITING', msg: "祝媽媽生日快樂！" });
+                finaleConfetti();
+            }
+        }
+
+        /* ==================== PLAYER LOGIC ==================== */
+
+        function joinGame() {
+            const nameInput = document.getElementById('player-name-input').value.trim();
+            if(!nameInput) return alert("請輸入名！");
+            
+            document.getElementById('join-status').classList.remove('hidden');
+            myName = nameInput;
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const hostId = urlParams.get('room');
+
+            peer = new Peer();
+            peer.on('open', () => {
+                hostConn = peer.connect(hostId);
+                hostConn.on('open', () => {
+                    hostConn.send({ type: 'JOIN', name: myName });
+                });
+                hostConn.on('data', (data) => handleHostMessage(data));
+                hostConn.on('close', () => alert("已與主機斷開連線！"));
+            });
+        }
+
+        function handleHostMessage(data) {
+            if (data.type === 'JOIN_SUCCESS') {
+                hideAll();
+                document.getElementById('player-wait').classList.remove('hidden');
+                document.getElementById('player-wait').classList.add('flex');
+                document.getElementById('my-name-display').innerText = myName;
+            }
+            if (data.type === 'STATE_QUESTION') {
+                hideAll();
+                document.getElementById('player-quiz').classList.remove('hidden');
+                document.getElementById('player-quiz').classList.add('flex');
+                document.getElementById('player-q-current').innerText = data.qNum;
+                document.getElementById('player-answered-msg').classList.add('hidden');
+                document.getElementById('player-answered-msg').classList.remove('flex');
+                
+                // Enable buttons
+                for(let i=0; i<4; i++) {
+                    document.getElementById(`p-btn-${i}`).disabled = false;
+                }
+            }
+            if (data.type === 'STATE_RESULT') {
+                hideAll();
+                const resScreen = document.getElementById('player-result');
+                resScreen.classList.remove('hidden');
+                resScreen.classList.add('flex');
+                
+                const icon = document.getElementById('result-icon');
+                const title = document.getElementById('result-title');
+                document.getElementById('result-score').innerText = data.score;
+                myScore = data.score;
+                document.getElementById('my-score').innerText = myScore;
+
+                if (data.correct) {
+                    resScreen.className = "z-10 flex flex-col items-center justify-center w-full h-full p-8 text-center bg-green-500 text-white";
+                    icon.className = "fa-solid fa-check-circle text-8xl mb-6";
+                    title.innerText = "答中！太犀利啦！";
+                } else {
+                    resScreen.className = "z-10 flex flex-col items-center justify-center w-full h-full p-8 text-center bg-red-600 text-white";
+                    icon.className = "fa-solid fa-xmark-circle text-8xl mb-6";
+                    title.innerText = "哎呀！答錯咗！";
+                }
+            }
+            if (data.type === 'STATE_WAITING') {
+                hideAll();
+                document.getElementById('player-wait').classList.remove('hidden');
+                document.getElementById('player-wait').classList.add('flex');
+                document.getElementById('player-wait').querySelector('p').innerText = data.msg;
+            }
+        }
+
+        function submitAnswer(ansIndex) {
+            // Disable all buttons to prevent double click
+            for(let i=0; i<4; i++) document.getElementById(`p-btn-${i}`).disabled = true;
+            
+            // Show waiting overlay
+            const msgObj = document.getElementById('player-answered-msg');
+            msgObj.classList.remove('hidden');
+            msgObj.classList.add('flex');
+
+            // Send to host
+            hostConn.send({ type: 'ANSWER', answer: ansIndex });
+        }
+
+        /* ==================== EFFECTS ==================== */
+        
+        function fireConfetti() {
+            const count = 200;
+            const defaults = { origin: { y: 0.7 } };
+            function fire(particleRatio, opts) { confetti(Object.assign({}, defaults, opts, { particleCount: Math.floor(count * particleRatio) })); }
+            fire(0.25, { spread: 26, startVelocity: 55 });
+            fire(0.2, { spread: 60 });
+            fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8 });
+            fire(0.1, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2 });
+            fire(0.1, { spread: 120, startVelocity: 45 });
+        }
+
+        function finaleConfetti() {
+            const duration = 15 * 1000;
+            const animationEnd = Date.now() + duration;
+            const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+            function randomInRange(min, max) { return Math.random() * (max - min) + min; }
+            const interval = setInterval(function() {
+                const timeLeft = animationEnd - Date.now();
+                if (timeLeft <= 0) return clearInterval(interval);
+                const particleCount = 50 * (timeLeft / duration);
+                confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } }));
+                confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } }));
+            }, 250);
+        }
+    </script>
+</body>
+</html>
