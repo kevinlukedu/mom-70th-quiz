@@ -84,6 +84,22 @@
              border-radius: 12px;
              padding: 8px 16px;
         }
+
+        /* ===== 手機修復：確保問答畫面填滿螢幕，4 個按鈕有真正高度 ===== */
+        /* Mobile fix: force the player quiz screen to fill the phone and give the 4 buttons real height */
+        #player-quiz {
+            height: 100vh;            /* fallback for older browsers */
+            height: 100dvh;           /* mobile-safe: ignores the moving address bar */
+            max-height: 100dvh;
+        }
+        #player-quiz .pq-answer-grid {
+            flex: 1 1 0%;             /* take all remaining vertical space */
+            min-height: 0;            /* critical: stops the grid collapsing to zero on mobile */
+        }
+        #player-quiz .pq-answer-grid > button {
+            min-height: 0;
+            height: 100%;
+        }
     </style>
 </head>
 <body class="text-white h-screen w-screen overflow-hidden flex flex-col items-center justify-center relative">
@@ -205,8 +221,7 @@
         </div>
     </div>
 
-    <div id="player-wait" class="z-10 hidden flex-col items-center justify-center w-full h-full p-8 text-center">
-        <i class="fa-solid fa-champagne-glasses text-6xl text-yellow-400 mb-6 animate-pulse"></i>
+    <!-- 已修復重疊問題的 Player Wait 畫面 -->
     <div id="player-wait" class="z-10 hidden flex-col items-center justify-center w-full h-full p-8 text-center">
         <i class="fa-solid fa-champagne-glasses text-6xl text-yellow-400 mb-6 animate-pulse"></i>
         <h2 class="text-4xl font-bold mb-4 text-yellow-200">準備就緒！</h2>
@@ -221,7 +236,7 @@
             <span class="bg-black/40 border border-rose-600 px-4 py-2 rounded-full text-pink-200">第 <span id="player-q-current">1</span> 題</span>
             <span class="bg-black/40 border border-yellow-600/50 px-4 py-2 rounded-full"><i class="fa-solid fa-star text-yellow-400"></i> <span id="my-score">0</span></span>
         </div>
-        <div class="grid grid-cols-2 grid-rows-2 gap-4 flex-grow pb-4">
+        <div class="pq-answer-grid grid grid-cols-2 grid-rows-2 gap-4 flex-grow pb-4">
             <button onclick="submitAnswer(0)" id="p-btn-0" class="opt-btn opt-0 rounded-2xl flex items-center justify-center shadow-lg w-full h-full">
                 <i class="fa-solid fa-play fa-rotate-270 text-7xl text-white/90 drop-shadow-md"></i>
             </button>
