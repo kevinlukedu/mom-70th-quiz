@@ -56,8 +56,11 @@
         .tvb-title {
             background: linear-gradient(to bottom, #fbbf24 0%, #d97706 100%);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0px 4px 8px rgba(0,0,0,0.8));
+            line-height: 1.2;        /* 畀多啲空間，避免 "y" 等字母下半截被切走 */
+            padding-bottom: 0.12em;
         }
 
         /* Kahoot Style Colors - Slightly richer for TVB feel */
@@ -99,6 +102,19 @@
         #player-quiz .pq-answer-grid > button {
             min-height: 0;
             height: 100%;
+        }
+
+        /* ===== QR code: 盡量大，方便嘉賓掃描；會跟住螢幕大細縮放 ===== */
+        #qrcode {
+            width: clamp(240px, 36vw, 480px);   /* 大螢幕最大約 480px，已經好大好易掃 */
+            height: auto;
+        }
+        #qrcode canvas,
+        #qrcode img {
+            width: 100% !important;
+            height: auto !important;
+            display: block;
+            border-radius: 6px;
         }
     </style>
 </head>
@@ -380,15 +396,15 @@
                 try {
                     new QRCode(qrDiv, {
                         text: joinUrl, 
-                        width: 200, 
-                        height: 200,
+                        width: 512, 
+                        height: 512,
                         colorDark : "#0f172a", 
                         colorLight : "#ffffff",
                         correctLevel : QRCode.CorrectLevel.L
                     });
                     
                     const urlDiv = document.createElement('div');
-                    urlDiv.className = 'mt-3 text-sm text-slate-700 break-all max-w-[200px] text-center font-bold bg-yellow-100 p-2 rounded';
+                    urlDiv.className = 'mt-3 text-sm text-slate-700 break-all max-w-full text-center font-bold bg-yellow-100 p-2 rounded';
                     urlDiv.innerHTML = `掃唔到？請輸入網址:<br><span class="text-blue-600">${joinUrl}</span>`;
                     qrDiv.appendChild(urlDiv);
                 } catch(e) {
