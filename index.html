@@ -266,13 +266,20 @@
         </div>
     </div>
 
+    <!-- Reconnecting overlay (player) -->
+    <div id="reconnect-overlay" class="hidden fixed inset-0 z-50 flex-col items-center justify-center bg-black/85 backdrop-blur-sm p-8 text-center">
+        <i class="fa-solid fa-rotate fa-spin text-6xl text-yellow-400 mb-6"></i>
+        <h2 class="text-3xl font-bold text-yellow-200 mb-2">重新連線中...</h2>
+        <p class="text-lg text-white/70">請保持 WiFi 開啟，唔好熄屏幕太耐<br>你嘅分數會保留</p>
+    </div>
+
     <script>
         // 專屬 Polly 媽媽的 10 條問題
         const questions = [
             { q: "1. 媽媽去酒樓飲茶，邊一籠點心係佢嘅「必點」？", options: ["晶瑩蝦餃皇", "蟹籽燒賣", "豉汁蒸排骨", "醬皇鳳爪"], answer: 0 },
             { q: "2. 媽媽平時喺屋企，最鍾意睇邊類電視節目？", options: ["愛·回家", "無綫新聞", "肥媽煮食節目", "韓劇"], answer: 3 },
             { q: "3. 媽媽出嚟社會做嘢，人生第一份工係做咩行業？", options: ["製衣廠", "教小學", "寫字樓文員", "百貨公司"], answer: 1 },
-            { q: "4. 媽媽出人生第一份糧嗰陣，買咗咩畀自己？", options: ["一餐好餸", "手錶", "靚衫", "畀晒阿媽"], answer: 2 },
+            { q: "4. 媽媽出人生第一份糧嗰陣，買咗咩畀自己？", options: ["手錶", "太陽眼鏡", "靚衫", "化妝品"], answer: 2 },
             { q: "5. 細個讀書嗰陣，媽媽邊一科成績最差？", options: ["中國語文", "英國語文", "體育", "數學"], answer: 3 },
             { q: "6. 後生嗰陣，媽媽覺得邊個男明星最型、最靚仔？", options: ["周潤發", "張國榮", "劉德華", "鄭少秋"], answer: 1 },
             { q: "7. 咁多年嚟，媽媽最常對住啲仔女講嘅「口頭禪」係咩？", options: ["食咗飯未呀？", "靚仔", "著多件衫呀！", "早啲瞓啦！"], answer: 1 },
@@ -284,21 +291,58 @@
         // System Variables
         let peer = null;
         let hostConn = null;
-        let playersData = {}; // { conn, name, score, currentAnswer }
+        let playersData = {}; // keyed by clientId: { conn, name, score, currentAnswer, connected }
         
         let currentQIndex = 0;
         let isHost = false;
         let myName = "";
         let myScore = 0;
 
+        // --- Reliability state (for 30+ players: rejoin + auto-reconnect) ---
+        let gameStarted = false;          // host: true once Show Time pressed
+        let gamePhase = 'lobby';          // host: 'lobby' | 'question' | 'reveal' | 'leaderboard' | 'finale'
+        let hostId = null;                // player: the room id from the URL
+        let myClientId = null;            // player: stable id saved on this phone
+        let manualClose = false;          // player: true only if we intentionally leave
+        let reconnectTimer = null;        // player: pending reconnect attempt
+
+        // Read/create a stable id for this phone so a refresh keeps the same score
+        function ensureClientId() {
+            try {
+                myClientId = localStorage.getItem('quiz_client_id');
+                if (!myClientId) {
+                    myClientId = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                    localStorage.setItem('quiz_client_id', myClientId);
+                }
+            } catch (e) {
+                myClientId = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+            }
+        }
+
         // Auto-detect Role based on URL
         window.onload = () => {
             const urlParams = new URLSearchParams(window.location.search);
-            const hostId = urlParams.get('room');
+            hostId = urlParams.get('room');
             if (hostId) {
+                ensureClientId();
                 hideAll();
                 document.getElementById('player-join').classList.remove('hidden');
                 document.getElementById('player-join').classList.add('flex');
+
+                // Prefill the name we used last time on this phone
+                try {
+                    const savedName = localStorage.getItem('quiz_player_name');
+                    if (savedName) document.getElementById('player-name-input').value = savedName;
+                } catch (e) {}
+
+                // If the phone wakes up / regains network, quietly reconnect
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible' && myName && !manualClose &&
+                        (!hostConn || !hostConn.open)) scheduleReconnect();
+                });
+                window.addEventListener('online', () => {
+                    if (myName && !manualClose && (!hostConn || !hostConn.open)) scheduleReconnect();
+                });
             } else {
                 document.getElementById('home-screen').classList.remove('hidden');
             }
@@ -319,6 +363,8 @@
             document.getElementById('host-lobby').classList.remove('hidden');
             document.getElementById('host-lobby').classList.add('flex');
             isHost = true;
+            gameStarted = false;
+            gamePhase = 'lobby';
 
             const qrDiv = document.getElementById("qrcode");
             qrDiv.innerHTML = '<div class="text-yellow-500 flex flex-col items-center py-8"><i class="fa-solid fa-circle-notch fa-spin text-4xl mb-4"></i><p class="font-bold">連線中...</p></div>';
@@ -358,23 +404,88 @@
             peer.on('connection', (conn) => {
                 conn.on('data', (data) => {
                     if (data.type === 'JOIN') {
-                        playersData[conn.peer] = { conn: conn, name: data.name, score: 0, currentAnswer: null };
-                        updateLobbyUI();
-                        conn.send({ type: 'JOIN_SUCCESS' });
+                        handlePlayerJoin(conn, data);
                     }
                     if (data.type === 'ANSWER') {
-                        if (playersData[conn.peer]) {
-                            playersData[conn.peer].currentAnswer = data.answer;
+                        if (gamePhase !== 'question') return;
+                        const key = findKeyByConn(conn);
+                        if (key) {
+                            playersData[key].currentAnswer = data.answer;
                             updateAnsweredCount();
                         }
                     }
                 });
-                
+
                 conn.on('close', () => {
-                    delete playersData[conn.peer];
+                    // Only act if this is still the player's CURRENT connection.
+                    // (If they already reconnected, a stale close must be ignored.)
+                    const key = findKeyByConn(conn);
+                    if (!key) return;
+                    if (!gameStarted) {
+                        // Still in the lobby: drop them so the count stays clean.
+                        delete playersData[key];
+                    } else {
+                        // Mid-game: keep their score, just mark them offline.
+                        playersData[key].connected = false;
+                    }
                     updateLobbyUI();
+                    updateAnsweredCount();
                 });
             });
+        }
+
+        // Find a player record by its live connection object
+        function findKeyByConn(conn) {
+            return Object.keys(playersData).find(k => playersData[k].conn === conn);
+        }
+
+        // Handle a JOIN, whether it's a brand-new player or a returning one
+        function handlePlayerJoin(conn, data) {
+            const name = (data.name || '').toString().trim().slice(0, 20) || '嘉賓';
+            const cid = data.clientId || ('peer_' + conn.peer);
+            let player = playersData[cid];
+
+            // Same phone returning (matched by stored id) -> keep score
+            if (!player) {
+                // Different phone / cleared storage: adopt a disconnected same-name slot
+                const oldKey = Object.keys(playersData).find(k =>
+                    !playersData[k].connected &&
+                    playersData[k].name.toLowerCase() === name.toLowerCase());
+                if (oldKey) {
+                    player = playersData[oldKey];
+                    delete playersData[oldKey];
+                    playersData[cid] = player;
+                }
+            }
+
+            if (player) {
+                player.conn = conn;
+                player.name = name;
+                player.connected = true;
+            } else {
+                player = playersData[cid] = {
+                    conn: conn, name: name, score: 0, currentAnswer: null, connected: true
+                };
+            }
+
+            safeSend(player, { type: 'JOIN_SUCCESS', score: player.score });
+            updateLobbyUI();
+            if (gameStarted) resyncPlayer(player);   // returning mid-game -> put them on the right screen
+        }
+
+        // Bring a (re)connecting player to whatever is happening right now
+        function resyncPlayer(player) {
+            if (gamePhase === 'question') {
+                if (player.currentAnswer === null) {
+                    safeSend(player, { type: 'STATE_QUESTION', qNum: currentQIndex + 1, score: player.score });
+                } else {
+                    safeSend(player, { type: 'STATE_WAITING', msg: '已收到你嘅答案，請望住大電視等開估！', score: player.score });
+                }
+            } else if (gamePhase === 'finale') {
+                safeSend(player, { type: 'STATE_WAITING', msg: '全集完滿結束！多謝參與！', score: player.score });
+            } else {
+                safeSend(player, { type: 'STATE_WAITING', msg: '歡迎返嚟！請望住大電視。', score: player.score });
+            }
         }
 
         function updateLobbyUI() {
@@ -382,6 +493,7 @@
             pList.innerHTML = '';
             let count = 0;
             for (let id in playersData) {
+                if (!playersData[id].connected) continue;
                 count++;
                 const badge = document.createElement('div');
                 badge.className = 'bg-yellow-500/20 border border-yellow-400/50 px-4 py-2 rounded-full font-bold text-lg text-yellow-100';
@@ -392,20 +504,29 @@
             document.getElementById('start-game-btn').disabled = count === 0;
         }
 
+        // Send to one player only if their connection is alive (won't crash on dropped phones)
+        function safeSend(player, msgObj) {
+            try {
+                if (player && player.conn && player.conn.open) player.conn.send(msgObj);
+            } catch (e) { /* ignore dead connection */ }
+        }
+
         function broadcast(msgObj) {
             for (let id in playersData) {
-                playersData[id].conn.send(msgObj);
+                safeSend(playersData[id], msgObj);
             }
         }
 
         function startHostGame() {
             currentQIndex = 0;
+            gameStarted = true;
             for(let id in playersData) playersData[id].score = 0;
             hostLoadQuestion();
         }
 
         function hostLoadQuestion() {
             hideAll();
+            gamePhase = 'question';
             document.getElementById('host-quiz').classList.remove('hidden');
             document.getElementById('host-quiz').classList.add('flex');
             
@@ -441,6 +562,7 @@
         }
 
         function hostRevealAnswer() {
+            gamePhase = 'reveal';
             const correctIndex = questions[currentQIndex].answer;
             let answerCounts = [0, 0, 0, 0];
 
@@ -450,9 +572,9 @@
                 
                 if (pAns === correctIndex) {
                     playersData[id].score += 1000; 
-                    playersData[id].conn.send({ type: 'STATE_RESULT', correct: true, score: playersData[id].score });
+                    safeSend(playersData[id], { type: 'STATE_RESULT', correct: true, score: playersData[id].score });
                 } else {
-                    playersData[id].conn.send({ type: 'STATE_RESULT', correct: false, score: playersData[id].score });
+                    safeSend(playersData[id], { type: 'STATE_RESULT', correct: false, score: playersData[id].score });
                 }
             }
 
@@ -480,6 +602,7 @@
 
         function hostShowLeaderboard() {
             hideAll();
+            gamePhase = 'leaderboard';
             document.getElementById('host-leaderboard').classList.remove('hidden');
             document.getElementById('host-leaderboard').classList.add('flex');
 
@@ -518,6 +641,7 @@
             } else {
                 // Finale
                 hideAll();
+                gamePhase = 'finale';
                 document.getElementById('host-finale').classList.remove('hidden');
                 document.getElementById('host-finale').classList.add('flex');
                 
@@ -548,32 +672,79 @@
         function joinGame() {
             const nameInput = document.getElementById('player-name-input').value.trim();
             if(!nameInput) return alert("請輸入大名！");
-            
-            document.getElementById('join-status').classList.remove('hidden');
-            myName = nameInput;
 
-            const urlParams = new URLSearchParams(window.location.search);
-            const hostId = urlParams.get('room');
+            myName = nameInput;
+            try { localStorage.setItem('quiz_player_name', myName); } catch(e) {}
+            document.getElementById('my-name-display').innerText = myName;
+            document.getElementById('join-status').classList.remove('hidden');
+            manualClose = false;
+            connectToHost();
+        }
+
+        // Build (or rebuild) the connection to the host. Safe to call repeatedly.
+        function connectToHost() {
+            if (!hostId) return;
+            // Always start from a fresh peer for a clean reconnect
+            if (peer && !peer.destroyed) { try { peer.destroy(); } catch(e) {} }
 
             peer = new Peer();
             peer.on('open', () => {
-                hostConn = peer.connect(hostId);
+                hostConn = peer.connect(hostId, { reliable: true });
+
                 hostConn.on('open', () => {
-                    hostConn.send({ type: 'JOIN', name: myName });
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                    showReconnecting(false);
+                    document.getElementById('join-status').classList.add('hidden');
+                    hostConn.send({ type: 'JOIN', name: myName, clientId: myClientId });
                 });
                 hostConn.on('data', (data) => handleHostMessage(data));
-                hostConn.on('close', () => alert("已與大電視斷開連線！"));
+                hostConn.on('close', () => { if (!manualClose) scheduleReconnect(); });
+                hostConn.on('error', () => { if (!manualClose) scheduleReconnect(); });
             });
+
+            peer.on('error', (err) => {
+                console.warn('Peer error:', err && err.type);
+                if (!manualClose) scheduleReconnect();
+            });
+            peer.on('disconnected', () => { if (!manualClose) scheduleReconnect(); });
+        }
+
+        // Try again in a few seconds (only one attempt queued at a time)
+        function scheduleReconnect() {
+            if (manualClose || reconnectTimer) return;
+            showReconnecting(true);
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connectToHost();
+            }, 2500);
+        }
+
+        function showReconnecting(show) {
+            const el = document.getElementById('reconnect-overlay');
+            if (!el) return;
+            if (show) { el.classList.remove('hidden'); el.classList.add('flex'); }
+            else { el.classList.add('hidden'); el.classList.remove('flex'); }
+        }
+
+        function setMyScore(s) {
+            if (typeof s !== 'number') return;
+            myScore = s;
+            const a = document.getElementById('my-score');   if (a) a.innerText = s;
+            const b = document.getElementById('result-score'); if (b) b.innerText = s;
         }
 
         function handleHostMessage(data) {
+            showReconnecting(false);
             if (data.type === 'JOIN_SUCCESS') {
+                setMyScore(data.score);
                 hideAll();
                 document.getElementById('player-wait').classList.remove('hidden');
                 document.getElementById('player-wait').classList.add('flex');
+                document.getElementById('player-wait').querySelector('p').innerText = '請望住大電視，等候 Polly 姐發辦...';
                 document.getElementById('my-name-display').innerText = myName;
             }
             if (data.type === 'STATE_QUESTION') {
+                setMyScore(data.score);
                 hideAll();
                 const quizScreen = document.getElementById('player-quiz');
                 quizScreen.classList.remove('hidden');
@@ -616,6 +787,7 @@
                 }
             }
             if (data.type === 'STATE_WAITING') {
+                setMyScore(data.score);
                 hideAll();
                 document.getElementById('player-wait').classList.remove('hidden');
                 document.getElementById('player-wait').classList.add('flex');
@@ -630,7 +802,15 @@
             msgObj.classList.remove('hidden');
             msgObj.classList.add('flex');
 
-            hostConn.send({ type: 'ANSWER', answer: ansIndex });
+            try {
+                if (hostConn && hostConn.open) {
+                    hostConn.send({ type: 'ANSWER', answer: ansIndex });
+                } else {
+                    scheduleReconnect();   // on reconnect the host re-sends the question so you can answer again
+                }
+            } catch (e) {
+                scheduleReconnect();
+            }
         }
 
         /* ==================== EFFECTS ==================== */
